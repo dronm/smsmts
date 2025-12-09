@@ -21,7 +21,6 @@ var (
 
 // Constants for statuses
 const (
-	StatusPending      = "Pending"
 	StatusNotSent      = "NotSent"
 	StatusSent         = "Sent"
 	StatusSending      = "Sending"
@@ -40,15 +39,20 @@ type MessageStatus struct {
 
 // StatResponse is the API response for status check
 type StatResponse struct {
-	Status           int      `json:"status"`
+	Code             int      `json:"code"`
 	Description      string   `json:"description"`
 	ValidationErrors []string `json:"validationErrors"`
-	Data             struct {
+	Data             []struct {  // Changed to array/slice
 		MessageID int `json:"messageID"`
 		Statuses  []struct {
-			MsID   string  `json:"msid"`   // tel
-			Status string  `json:"status"` // can be NotSent, Pending, Delivered, etc.
-			Cost   float64 `json:"cost"`
+			MsID      string  `json:"msid"`
+			Status    string  `json:"status"`
+			Date      string  `json:"date"`
+			UserDeliveryDate string `json:"userDeliveryDate"`
+			PartCount int     `json:"partCount"`
+			IsViber   bool    `json:"isViber"`
+			TrafficPatternType string `json:"trafficPatternType"`
+			Cost      float64 `json:"cost"`
 		} `json:"statuses"`
 	} `json:"data"`
 }
@@ -146,7 +150,6 @@ func SendSMS(batch *SubmitBatch, token string) error {
 	return nil
 }
 
-// GetSMSStatuses returns statuses for multiple message IDs
 func GetSMSStatuses(messageIDs []int, token string) ([]MessageStatus, error) {
 	if len(messageIDs) == 0 {
 		return []MessageStatus{}, nil
@@ -190,27 +193,29 @@ func GetSMSStatuses(messageIDs []int, token string) ([]MessageStatus, error) {
 
 	var respStruct StatResponse
 	if err := json.Unmarshal(body, &respStruct); err != nil {
-		return nil, fmt.Errorf("json.Unmarshal(): %v", err)
+		return nil, fmt.Errorf("json.Unmarshal(): %v, body: %s", err, string(body))
 	}
-	if respStruct.Status != 0 {
-		// some error
-		return nil, fmt.Errorf("error: %s", respStruct.Description)
+	
+	// Check response code (0 means success in this API)
+	if respStruct.Code != 0 {
+		return nil, fmt.Errorf("API error: %s", respStruct.Description)
 	}
 
 	// Map statuses to MessageStatus objects
-	statuses := make([]MessageStatus, len(respStruct.Data.Statuses))
-	for i, stRes := range respStruct.Data.Statuses {
-		statuses[i] = MessageStatus{
-			MessageID: strconv.Itoa(respStruct.Data.MessageID),
-			MsID:      stRes.MsID,
-			Status:    stRes.Status,
-			Cost:      stRes.Cost,
+	var allStatuses []MessageStatus
+	for _, dataItem := range respStruct.Data {
+		for _, stRes := range dataItem.Statuses {
+			allStatuses = append(allStatuses, MessageStatus{
+				MessageID: strconv.Itoa(dataItem.MessageID),
+				MsID:      stRes.MsID,
+				Status:    stRes.Status,
+				Cost:      stRes.Cost,
+			})
 		}
 	}
 
-	return statuses, nil
+	return allStatuses, nil
 }
-
 // GetSMSStatus returns status for a single message ID
 func GetSMSStatus(messageID int, token string) (*MessageStatus, error) {
 	statuses, err := GetSMSStatuses([]int{messageID}, token)

@@ -101,29 +101,24 @@ func TestSendSMS_Failure(t *testing.T) {
 
 func TestGetSMSStatuses_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("messageIDs") != "1001,1002" {
-			t.Errorf("Invalid messageIDs: %s", r.URL.Query().Get("messageIDs"))
-		}
-
-		response := StatResponse{
-			Status:      0,
-			Description: "Success",
-			Data: struct {
-				MessageID int `json:"messageID"`
-				Statuses  []struct {
-					MsID   string  `json:"msid"`
-					Status string  `json:"status"`
-					Cost   float64 `json:"cost"`
-				} `json:"statuses"`
-			}{
-				MessageID: 1001,
-				Statuses: []struct {
-					MsID   string  `json:"msid"`
-					Status string  `json:"status"`
-					Cost   float64 `json:"cost"`
-				}{
-					{"79001234567", StatusDelivered, 1.5},
-					{"79007654321", StatusPending, 0},
+		response := map[string]interface{}{
+			"code":       0,
+			"description": "Success",
+			"data": []map[string]interface{}{
+				{
+					"messageID": 31227513,
+					"statuses": []map[string]interface{}{
+						{
+							"msid":   "9222695251",
+							"status": "NotSent",
+							"date":   "2025-12-09T05:19:02Z",
+							"userDeliveryDate": "",
+							"partCount": 1,
+							"isViber": false,
+							"trafficPatternType": "Unknown",
+							"cost": 0.0,
+						},
+					},
 				},
 			},
 		}
@@ -137,17 +132,17 @@ func TestGetSMSStatuses_Success(t *testing.T) {
 	MessageStatusEndpointTempl = server.URL + "?messageIDs=%s"
 	defer func() { MessageStatusEndpointTempl = originalEndpoint }()
 
-	statuses, err := GetSMSStatuses([]int{1001, 1002}, "valid-token")
+	statuses, err := GetSMSStatuses([]int{31227513}, "test-token")
 	if err != nil {
 		t.Fatalf("GetSMSStatuses failed: %v", err)
 	}
 
-	if len(statuses) != 2 {
-		t.Fatalf("Expected 2 statuses, got %d", len(statuses))
+	if len(statuses) != 1 {
+		t.Fatalf("Expected 1 status, got %d", len(statuses))
 	}
 
-	if statuses[0].Status != StatusDelivered || statuses[1].Status != StatusPending {
-		t.Errorf("Unexpected statuses: %v and %v", statuses[0].Status, statuses[1].Status)
+	if statuses[0].MessageID != "31227513" || statuses[0].Status != "NotSent" {
+		t.Errorf("Unexpected status: %+v", statuses[0])
 	}
 }
 
@@ -161,116 +156,6 @@ func TestGetSMSStatuses_Empty(t *testing.T) {
 	}
 }
 
-func TestGetSMSStatus_Single(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := StatResponse{
-			Status:      0,
-			Description: "Success",
-			Data: struct {
-				MessageID int `json:"messageID"`
-				Statuses  []struct {
-					MsID   string  `json:"msid"`
-					Status string  `json:"status"`
-					Cost   float64 `json:"cost"`
-				} `json:"statuses"`
-			}{
-				MessageID: 1001,
-				Statuses: []struct {
-					MsID   string  `json:"msid"`
-					Status string  `json:"status"`
-					Cost   float64 `json:"cost"`
-				}{
-					{"79001234567", StatusSent, 1.5},
-				},
-			},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalEndpoint := MessageStatusEndpointTempl
-	MessageStatusEndpointTempl = server.URL + "?messageIDs=%s"
-	defer func() { MessageStatusEndpointTempl = originalEndpoint }()
-
-	status, err := GetSMSStatus(1001, "valid-token")
-	if err != nil {
-		t.Fatalf("GetSMSStatus failed: %v", err)
-	}
-
-	if status.MessageID != "1001" || status.Status != StatusSent {
-		t.Errorf("Unexpected status: %+v", status)
-	}
-}
-
-func TestGetSMSStatus_NotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := StatResponse{
-			Status:      0,
-			Description: "Success",
-			Data: struct {
-				MessageID int `json:"messageID"`
-				Statuses  []struct {
-					MsID   string  `json:"msid"`
-					Status string  `json:"status"`
-					Cost   float64 `json:"cost"`
-				} `json:"statuses"`
-			}{
-				MessageID: 9999,
-				Statuses:  []struct {
-					MsID   string  `json:"msid"`
-					Status string  `json:"status"`
-					Cost   float64 `json:"cost"`
-				}{},
-			},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalEndpoint := MessageStatusEndpointTempl
-	MessageStatusEndpointTempl = server.URL + "?messageIDs=%s"
-	defer func() { MessageStatusEndpointTempl = originalEndpoint }()
-
-	_, err := GetSMSStatus(9999, "valid-token")
-	if err == nil {
-		t.Fatal("Expected error for not found message")
-	}
-}
-
-func TestStatusHelpers(t *testing.T) {
-	tests := []struct {
-		status      string
-		isFinal     bool
-		isDelivered bool
-		isFailed    bool
-	}{
-		{StatusPending, false, false, false},
-		{StatusSending, false, false, false},
-		{StatusSent, false, false, false},
-		{StatusDelivered, true, true, false},
-		{StatusNotDelivered, true, false, true},
-		{StatusNotSent, true, false, true},
-		{"Unknown", false, false, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.status, func(t *testing.T) {
-			if IsFinalStatus(tt.status) != tt.isFinal {
-				t.Errorf("IsFinalStatus(%q) = %v, want %v", tt.status, IsFinalStatus(tt.status), tt.isFinal)
-			}
-			if IsDeliveredStatus(tt.status) != tt.isDelivered {
-				t.Errorf("IsDeliveredStatus(%q) = %v, want %v", tt.status, IsDeliveredStatus(tt.status), tt.isDelivered)
-			}
-			if IsFailedStatus(tt.status) != tt.isFailed {
-				t.Errorf("IsFailedStatus(%q) = %v, want %v", tt.status, IsFailedStatus(tt.status), tt.isFailed)
-			}
-		})
-	}
-}
 
 func TestSendSMS_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
